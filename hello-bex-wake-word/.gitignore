@@ -1,0 +1,20 @@
+# Python environment
+.venv/
+__pycache__/
+
+# Training tools: cloned from GitHub, see README
+microWakeWord/
+piper-sample-generator/
+
+# Generated and downloaded data (several GB, mixed licenses)
+generated_samples/
+generated_augmented_features/
+mit_rirs/
+audioset/
+audioset_16k/
+fma/
+fma_16k/
+negative_datasets/
+trained_models/
+*.part
+*.log

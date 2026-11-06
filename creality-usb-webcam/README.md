@@ -40,3 +40,7 @@ A firmware update may remove both files; copy them again. Don't accept a camera 
 Creality Print doesn't show the webcam, and Creality Cloud connects but stays grey (its H.264 path most likely can't decode the DHT-less frames).
 
 `auto_uvc.sh` is based on Creality's original script from the printer firmware.
+
+## Camera mount
+
+I printed [Ender 3 V3 SE / KE Logitech Webcam Camera Mount (C270 or similar)](https://www.printables.com/model/1161793-ender-3-v3-se-ke-logitech-webcam-camera-mount-c270) by FeetOffTheTable. The C310 fits it. PLA, no supports, 46 minutes. It slides onto the right end of the X gantry, so the camera moves up with Z.

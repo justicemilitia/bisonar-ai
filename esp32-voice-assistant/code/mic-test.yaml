@@ -1,0 +1,238 @@
+# INMP441 mikrofon testi: sadece ESP32 + INMP441 ile (amfi, hoparlör ve LED gerekmez).
+#
+# Bağlantı:
+#   INMP441 SCK -> GPIO25
+#   INMP441 WS  -> GPIO14 (was GPIO26; pad burned while soldering)
+#   INMP441 SD  -> GPIO33
+#   INMP441 L/R -> GND   (sol kanal)
+#   INMP441 VDD -> 3V3   (5V DEĞİL)
+#   INMP441 GND -> GND
+#
+# Test:
+#   1. Home Assistant'ta "Mikrofon Ortalama Seviye" sensörüne bak: sessizde düşük,
+#      konuşunca/alkışlayınca belirgin şekilde yükselmeli (değerler dBFS, 0'a yaklaştıkça yüksek).
+#   2. "Hello Bex" de: "Uyandırma Kelimesi Algılandı" sensörü 2 saniye açık olmalı, logda da görünmeli.
+
+esphome:
+  name: jarvis-mic-test
+  friendly_name: Jarvis Mic Test
+  # Derleme sırasında bilgisayar donar/çökerse alttaki satırı aç.
+  # compile_process_limit: 2
+  on_boot:
+    priority: -100
+    then:
+      # Ses seviyesi Home Assistant'taki "Hoparlör sesi" ayarından gelir
+      - speaker.volume_set:
+          id: hoparlor
+          volume: !lambda return id(hoparlor_sesi).state / 100.0;
+      - micro_wake_word.start:
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Jarvis-Mic-Test"
+
+captive_portal:
+
+i2s_audio:
+  - id: i2s_in
+    i2s_lrclk_pin: GPIO14
+    i2s_bclk_pin: GPIO25
+
+microphone:
+  - platform: i2s_audio
+    id: mic
+    i2s_audio_id: i2s_in
+    adc_type: external
+    i2s_din_pin: GPIO33
+    channel: left
+    bits_per_sample: 32bit
+    sample_rate: 16000
+
+# Test 1: ses seviyesi
+# MAX98357A amfi + 4 Ω 3 W hoparlör. BCLK/LRC mikrofonla ortak (GPIO25/GPIO14)
+speaker:
+  - platform: i2s_audio
+    id: hoparlor
+    i2s_audio_id: i2s_in
+    dac_type: external
+    i2s_dout_pin: GPIO27   # MAX98357A DIN
+    channel: mono
+    bits_per_sample: 32bit
+    sample_rate: 16000
+    # Ses parçaları arasında beklerken hemen kapanmasın
+    timeout: 2s
+
+sensor:
+  - platform: sound_level
+    # passive: mikrofonu kendisi açık tutmaz; hoparlör I2S hattını kullanabilsin
+    passive: true
+    measurement_duration: 1000ms
+    microphone:
+      microphone: mic
+    peak:
+      name: "Mikrofon Tepe Seviyesi"
+    rms:
+      name: "Mikrofon Ortalama Seviye"
+      on_value:
+        - logger.log:
+            format: "Ses seviyesi (RMS): %.1f dB"
+            args: ["x"]
+
+# Test 2: uyandırma kelimesi (cihaz üzerinde)
+binary_sensor:
+  - platform: template
+    id: wake_word_detected
+    name: "Uyandırma Kelimesi Algılandı"
+
+micro_wake_word:
+  microphone:
+    microphone: mic
+  # Algılayınca dur: mikrofon ve hoparlör aynı I2S hattını paylaşıyor,
+  # dinleme sürerse hoparlör "Parent bus is busy" hatası veriyor
+  stop_after_detection: true
+  models:
+    # Kendi eğittiğimiz model: https://github.com/justicemilitia/bisonar-ai/tree/main/hello-bex-wake-word
+    - model: models/hello_bex.json
+      id: hello_bex
+  on_wake_word_detected:
+    - logger.log:
+        format: "Uyandırma kelimesi algılandı: %s"
+        args: ["wake_word.c_str()"]
+    - light.turn_on:
+        id: durum_led
+        effect: "Hizli Yanip Sonme"
+    - voice_assistant.start:
+        wake_word: !lambda return wake_word;
+    # Asistan başlayamazsa (örn. Home Assistant'a bağlı değilse) LED yanıp sönmede takılı kalmasın
+    - wait_until:
+        condition:
+          voice_assistant.is_running:
+        timeout: 3s
+    - if:
+        condition:
+          not:
+            voice_assistant.is_running:
+        then:
+          - light.turn_off: durum_led
+          - micro_wake_word.start:
+    - binary_sensor.template.publish:
+        id: wake_word_detected
+        state: true
+    - delay: 2s
+    - binary_sensor.template.publish:
+        id: wake_word_detected
+        state: false
+
+# Uyandırma hassasiyeti: Home Assistant'tan seçilir, yeniden yükleme gerekmez.
+# Eşik 0-255 arası: 240 = %94 (modelin varsayılanı), 219 = %86, 199 = %78.
+# Değerler eğitim testindeki eşiklerden (bkz. GitHub README).
+number:
+  - platform: template
+    name: "Hoparlör sesi"
+    id: hoparlor_sesi
+    icon: mdi:volume-high
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    min_value: 10
+    max_value: 100
+    step: 5
+    initial_value: 100
+    unit_of_measurement: "%"
+    on_value:
+      - speaker.volume_set:
+          id: hoparlor
+          volume: !lambda return x / 100.0;
+
+select:
+  - platform: template
+    name: "Uyandırma hassasiyeti"
+    id: uyandirma_hassasiyeti
+    icon: mdi:account-voice
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    options:
+      - "Normal (%94)"
+      - "Hassas (%86)"
+      - "Çok hassas (%78)"
+    initial_option: "Normal (%94)"
+    on_value:
+      - lambda: |-
+          if (x == "Normal (%94)") id(hello_bex).set_probability_cutoff(240);
+          else if (x == "Hassas (%86)") id(hello_bex).set_probability_cutoff(219);
+          else id(hello_bex).set_probability_cutoff(199);
+      - logger.log:
+          format: "Uyandırma hassasiyeti: %s"
+          args: ["x.c_str()"]
+
+# Test 3: Home Assistant'a sesli komut (hoparlör yok: yanıt sadece logda/HA'da yazı olarak görünür)
+voice_assistant:
+  id: va
+  microphone:
+    microphone: mic
+  speaker: hoparlor
+  # Home Assistant dinlemeye hazır: LED sabit yanar
+  on_listening:
+    - light.turn_on:
+        id: durum_led
+        effect: "None"
+  on_stt_end:
+    - logger.log:
+        format: "Anlaşılan komut: %s"
+        args: ["x.c_str()"]
+  on_end:
+    - light.turn_off: durum_led
+  # Cevap sesi Home Assistant'tan parça parça geliyor ve on_end'den sonra da sürüyor.
+  # Uyandırma kelimesini ses akışı bitip hoparlör susunca yeniden başlat,
+  # yoksa mikrofon I2S hattını geri alıyor ve hoparlör "Parent bus is busy" diyor.
+  on_tts_stream_end:
+    - wait_until:
+        not:
+          speaker.is_playing: hoparlor
+    - micro_wake_word.start:
+  on_tts_start:
+    - logger.log:
+        format: "Home Assistant yanıtı: %s"
+        args: ["x.c_str()"]
+  on_error:
+    - logger.log:
+        format: "Sesli asistan hatası: %s - %s"
+        args: ["code.c_str()", "message.c_str()"]
+    - light.turn_off: durum_led
+    - micro_wake_word.start:
+
+# Kart üzerindeki GPIO2 LED'i (DevKit V1; kırmızı güç LED'i yazılımla kontrol edilemez):
+# "Hello Bex" -> hızlı yanıp söner, dinlemeye hazır -> sabit, bitince söner
+output:
+  - platform: gpio
+    pin: GPIO2
+    id: dahili_led
+
+light:
+  - platform: binary
+    id: durum_led
+    name: "Durum LED"
+    output: dahili_led
+    effects:
+      - strobe:
+          name: "Hizli Yanip Sonme"
+          colors:
+            - state: true
+              duration: 80ms
+            - state: false
+              duration: 80ms

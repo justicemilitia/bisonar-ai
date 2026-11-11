@@ -1,0 +1,37 @@
+# Home Assistant automation: "Hello Bex, salondaki hava temizleyiciyi aç/kapat".
+# The small purifier is named "Küçük hava temizleyici", so Assist can't match "salondaki hava temizleyici"
+# on its own; giving it the alias "hava temizleyici" would clash with the big one on the balcony.
+alias: Salon hava temizleyici sesli
+description: >-
+  "Salondaki hava temizleyiciyi aç/kapat" komutunu salondaki küçük hava
+  temizleyiciye (Xiaomi Air Purifier 4 Compact) yönlendirir.
+mode: single
+triggers:
+  - trigger: conversation
+    id: ac
+    command:
+      - "salon[daki|da] hava temizleyici[yi|i] aç"
+      - "salon[daki|da] hava temizleyici[yi|i] çalıştır"
+  - trigger: conversation
+    id: kapat
+    command:
+      - "salon[daki|da] hava temizleyici[yi|i] kapat"
+      - "salon[daki|da] hava temizleyici[yi|i] durdur"
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: ac
+        sequence:
+          - action: fan.turn_on
+            target:
+              entity_id: fan.xiaomi_cpa4_4b15_air_purifier
+          - set_conversation_response: Salondaki hava temizleyici açıldı.
+      - conditions:
+          - condition: trigger
+            id: kapat
+        sequence:
+          - action: fan.turn_off
+            target:
+              entity_id: fan.xiaomi_cpa4_4b15_air_purifier
+          - set_conversation_response: Salondaki hava temizleyici kapatıldı.
